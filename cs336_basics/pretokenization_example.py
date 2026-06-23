@@ -1,5 +1,7 @@
 import os
 from typing import BinaryIO
+import regex as re
+from functools import reduce
 
 
 def find_chunk_boundaries(
@@ -48,11 +50,35 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
+def count_words(chunk: list[str]) -> dict[str, int]:
+    word_count = {}
+    for word in chunk:
+        if word in word_count:
+            word_count[word] += 1
+        else:
+            word_count[word] = 1
+    
+    return word_count
+
+def merge_count_dicts(wcl: dict[str, int], wcr: dict[str, int]) -> dict[str,int]:
+    wcl_cpy = wcl.copy()
+
+    for k,v in wcr.items():
+        if k in wcl_cpy:
+            wcl_cpy[k] += v
+        else:
+            wcl_cpy[k] = v
+    
+    return wcl_cpy
 
 ## Usage
-with open(..., "rb") as f:
+with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
     num_processes = 4
     boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    
+    count_list = []
 
     # The following is a serial implementation, but you can parallelize this
     # by sending each start/end pair to a set of processes.
@@ -60,3 +86,11 @@ with open(..., "rb") as f:
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
         # Run pre-tokenization on your chunk and store the counts for each pre-token
+        pretokens = re.findall(PAT, chunk)
+        word_count = count_words(pretokens)
+
+        count_list.append(word_count)
+    
+    pretoken_counts = reduce(merge_count_dicts, count_list)
+
+    print("Hello")
