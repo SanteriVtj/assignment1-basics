@@ -50,17 +50,18 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
-def count_words(chunk: list[str]) -> dict[str, int]:
+def count_words(chunk: list[str]) -> dict[tuple[bytes, ...], int]:
     word_count = {}
     for word in chunk:
-        if word in word_count:
-            word_count[word] += 1
+        bword = tuple(word.encode("utf-8"))
+        if bword in word_count:
+            word_count[bword] += 1
         else:
-            word_count[word] = 1
+            word_count[bword] = 1
     
     return word_count
 
-def merge_count_dicts(wcl: dict[str, int], wcr: dict[str, int]) -> dict[str,int]:
+def merge_count_dicts(wcl: dict[tuple[bytes ,...], int], wcr: dict[tuple[bytes ,...], int]) -> dict[tuple[bytes ,...],int]:
     wcl_cpy = wcl.copy()
 
     for k,v in wcr.items():
@@ -92,5 +93,4 @@ with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
         count_list.append(word_count)
     
     pretoken_counts = reduce(merge_count_dicts, count_list)
-
-    print("Hello")
+    
