@@ -4,6 +4,8 @@ import regex as re
 from functools import reduce
 import time
 from multiprocessing import Pool
+import logging
+from datetime import datetime
 
 
 def find_chunk_boundaries(
@@ -57,47 +59,34 @@ def count_words(chunk: tuple[int,int]) -> dict[tuple[bytes, ...], int]:
         text = read_from_n(chunk[0], chunk[1], f)
 
     word_count = {}
-    for word in text:
-        bword = tuple(word.encode("utf-8"))
-        if bword in word_count:
-            word_count[bword] += 1
-        else:
-            word_count[bword] = 1
+    for segment in text.split(SPLIT_TOKEN.decode("utf-8")):
+        for word in PAT.finditer(segment):
+            bword = tuple(word.group().encode("utf-8"))
+            if bword in word_count:
+                word_count[bword] += 1
+            else:
+                word_count[bword] = 1
     
     return word_count
-
-def merge_count_dicts(wcl: dict[tuple[bytes ,...], int], wcr: dict[tuple[bytes ,...], int]) -> dict[tuple[bytes ,...],int]:
-    wcl_cpy = wcl.copy()
-
-    for k,v in wcr.items():
-        if k in wcl_cpy:
-            wcl_cpy[k] += v
-        else:
-            wcl_cpy[k] = v
-    
-    return wcl_cpy
 
 def read_from_n(start: int, end: int, f: BinaryIO) -> str:
     f.seek(start)
     chunk = f.read(end - start).decode("utf-8", errors="ignore")
     return chunk
 
-def pretokenize(x: tuple[int, int]) -> dict[tuple[bytes, ...], int]:
-    chunk = read_from_n(x[0], x[1], f)
-    pretokens = re.findall(PAT, chunk)
-    
-    return count_words(pretokens)
 
 ## Usage
 if __name__=="__main__":
-    # with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
-    # with open("data/small_example.txt", "rb") as f:
     num_processes = os.cpu_count() or 4
 
     CHUNK_SIZE = num_processes*1024**2
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
     FILE_PATH = "data/TinyStoriesV2-GPT4-train.txt"
+    # FILE_PATH = "data/small_example.txt"
     SPLIT_TOKEN = b"<|endoftext|>"
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(filename='pretokenizer.log', level=logging.INFO)
+
     
     with open(FILE_PATH, "rb") as f:
         f.seek(0, os.SEEK_END)
@@ -118,11 +107,15 @@ if __name__=="__main__":
             for k,v in c.items():
                 pretoken_counts[k] = pretoken_counts.get(k,0) + v
 
-        # count_list = p.map(pretokenize, )
+    logger.info(f"{FILE_PATH.split("/")[-1]} pretokenized {datetime.today().strftime('%Y-%m-%d %H:%M:%S')} in {(time.time()-t0):.3f}s")
 
-    print(f"Time {(time.time()-t0):.3f}")
-    
-    # pretoken_counts = reduce(merge_count_dicts, count_list)
+    token_str = ""
+    for k,v in pretoken_counts.items():
+        token_str += f"{k}; {v}\n"
+    with open(f"artefacts/pretokens-{FILE_PATH.split("/")[-1]}", "w") as f:
+        f.write(token_str)
+        logger.info(f"Pretokens written to artefacts/pretokens-{FILE_PATH.split("/")[-1]}.txt")
+
     
     # ds = ""
     # for i, (k,v) in enumerate(pretoken_counts.items()):
