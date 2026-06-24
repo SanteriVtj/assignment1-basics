@@ -52,9 +52,12 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
-def count_words(chunk: list[str]) -> dict[tuple[bytes, ...], int]:
+def count_words(chunk: tuple[int,int]) -> dict[tuple[bytes, ...], int]:
+    with open(FILE_PATH, "rb") as f:
+        text = read_from_n(chunk[0], chunk[1], f)
+
     word_count = {}
-    for word in chunk:
+    for word in text:
         bword = tuple(word.encode("utf-8"))
         if bword in word_count:
             word_count[bword] += 1
@@ -79,36 +82,50 @@ def read_from_n(start: int, end: int, f: BinaryIO) -> str:
     chunk = f.read(end - start).decode("utf-8", errors="ignore")
     return chunk
 
-def pretokenize(x):
+def pretokenize(x: tuple[int, int]) -> dict[tuple[bytes, ...], int]:
     chunk = read_from_n(x[0], x[1], f)
     pretokens = re.findall(PAT, chunk)
     
-    return count_words(pretokens) 
+    return count_words(pretokens)
 
 ## Usage
 if __name__=="__main__":
-    with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
+    # with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
     # with open("data/small_example.txt", "rb") as f:
-        num_processes = 4
-        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+    num_processes = os.cpu_count() or 4
 
-        PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        
-        # count_list = []
+    CHUNK_SIZE = num_processes*1024**2
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    FILE_PATH = "data/TinyStoriesV2-GPT4-train.txt"
+    SPLIT_TOKEN = b"<|endoftext|>"
+    
+    with open(FILE_PATH, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        f_size = f.tell()
 
-        # The following is a serial implementation, but you can parallelize this
-        # by sending each start/end pair to a set of processes.
-        t0 = time.time()
+        target_size = max(num_processes, f_size // CHUNK_SIZE)
+        boundaries = find_chunk_boundaries(f, target_size, SPLIT_TOKEN)
 
-        p = Pool(num_processes)
-        count_list = p.map(pretokenize, zip(boundaries[:-1], boundaries[1:]))
+    chunks = list(zip(boundaries[:-1], boundaries[1:]))
+    pretoken_counts: dict[tuple[bytes, ...], int] = {}
 
-        print(f"Time {(time.time()-t0):.3f}")
-        
-        pretoken_counts = reduce(merge_count_dicts, count_list)
-        
-        # ds = ""
-        # for i, (k,v) in enumerate(pretoken_counts.items()):
-        #     sep = "\n" if i % 5 == 0 else ""
-        #     ds += f" {bytes(k).decode("utf-8")}:{v}"
-        # print(ds)
+    # The following is a serial implementation, but you can parallelize this
+    # by sending each start/end pair to a set of processes.
+    t0 = time.time()
+
+    with Pool(num_processes) as p:
+        for c in p.imap_unordered(count_words, chunks, chunksize=4):
+            for k,v in c.items():
+                pretoken_counts[k] = pretoken_counts.get(k,0) + v
+
+        # count_list = p.map(pretokenize, )
+
+    print(f"Time {(time.time()-t0):.3f}")
+    
+    # pretoken_counts = reduce(merge_count_dicts, count_list)
+    
+    # ds = ""
+    # for i, (k,v) in enumerate(pretoken_counts.items()):
+    #     sep = "\n" if i % 5 == 0 else ""
+    #     ds += f" {bytes(k).decode("utf-8")}:{v}"
+    # print(ds)
