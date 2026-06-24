@@ -2,6 +2,8 @@ import os
 from typing import BinaryIO
 import regex as re
 from functools import reduce
+import time
+from multiprocessing import Pool
 
 
 def find_chunk_boundaries(
@@ -72,25 +74,41 @@ def merge_count_dicts(wcl: dict[tuple[bytes ,...], int], wcr: dict[tuple[bytes ,
     
     return wcl_cpy
 
+def read_from_n(start: int, end: int, f: BinaryIO) -> str:
+    f.seek(start)
+    chunk = f.read(end - start).decode("utf-8", errors="ignore")
+    return chunk
+
+def pretokenize(x):
+    chunk = read_from_n(x[0], x[1], f)
+    pretokens = re.findall(PAT, chunk)
+    
+    return count_words(pretokens) 
+
 ## Usage
-with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
-    num_processes = 4
-    boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+if __name__=="__main__":
+    with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
+    # with open("data/small_example.txt", "rb") as f:
+        num_processes = 4
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    
-    count_list = []
+        PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+        
+        # count_list = []
 
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
-        f.seek(start)
-        chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
-        pretokens = re.findall(PAT, chunk)
-        word_count = count_words(pretokens)
+        # The following is a serial implementation, but you can parallelize this
+        # by sending each start/end pair to a set of processes.
+        t0 = time.time()
 
-        count_list.append(word_count)
-    
-    pretoken_counts = reduce(merge_count_dicts, count_list)
-    
+        p = Pool(num_processes)
+        count_list = p.map(pretokenize, zip(boundaries[:-1], boundaries[1:]))
+
+        print(f"Time {(time.time()-t0):.3f}")
+        
+        pretoken_counts = reduce(merge_count_dicts, count_list)
+        
+        # ds = ""
+        # for i, (k,v) in enumerate(pretoken_counts.items()):
+        #     sep = "\n" if i % 5 == 0 else ""
+        #     ds += f" {bytes(k).decode("utf-8")}:{v}"
+        # print(ds)
